@@ -1,0 +1,25 @@
+General:
+  Color: black
+  Label: ffffff
+  ChromaKey: 00ff00
+  Result: '000000'
+  ResultBackground: ffffff
+  Commands:
+  - Name: roll
+    Dice: 1d20
+    Message: '{user} rolled {result}'
+    DisplayTime: 5
+  - Name: percent
+    Dice: 1d100+1d10
+    Message: '{user} rolled {result}%'
+    DisplayTime: 5
+Twitch:
+  ClientId: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+  ClientSecret: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+  Channel: MyTwitchChannel
+  Command: roll
+OBS:
+  Scene: _Dice
+  Host: 127.0.0.1
+  Port: 4455
+  Password: xxxxxxxxxxxxxxx

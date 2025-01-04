@@ -2,6 +2,7 @@
 build/
 dist/
 config.toml
+config.yml
 nuitka-crash-report.xml
 compilation-report.xml
 *.spec

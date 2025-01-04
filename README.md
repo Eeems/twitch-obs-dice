@@ -6,7 +6,7 @@ Configuration
 - Set Category to Chat Bot
 - Set the Client Type to Confidential
 - Save
-- Copy/rename config.example.toml to config.toml
+- Copy/rename config.example.yml to config.yml
 - Set ClientId to the value for the application you created in https://dev.twitch.tv/console/apps
 - Set ClientSecret to a new the value generated for the application you created in https://dev.twitch.tv/console/apps
 - Set the Scene to the name of the scene you want the dice to be added to

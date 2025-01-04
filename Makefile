@@ -49,7 +49,7 @@ executable: $(VENV_BIN_ACTIVATE)
 	if [ -d dist/twitch-obs-dice.build ]; then \
 	    rm -r dist/twitch-obs-dice.build; \
 	fi
-	cp config.example.toml dist/
+	cp config.example.yml dist/
 
 all: executable
 

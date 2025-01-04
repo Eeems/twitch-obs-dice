@@ -1,3 +1,4 @@
+import os
 import asyncio
 import tomllib
 
@@ -5,13 +6,15 @@ import obsws_python as obs
 
 from random import randint
 
-from twitchAPI.twitch import Twitch
+from ruamel.yaml import YAML
+
+from twitchAPI.chat import Chat
+from twitchAPI.chat import ChatCommand
+from twitchAPI.chat import EventData
 from twitchAPI.oauth import UserAuthenticator
+from twitchAPI.twitch import Twitch
 from twitchAPI.type import AuthScope
 from twitchAPI.type import ChatEvent
-from twitchAPI.chat import Chat
-from twitchAPI.chat import EventData
-from twitchAPI.chat import ChatCommand
 
 
 def roll_command(command):
@@ -41,7 +44,9 @@ def roll_command(command):
                         result += value * 10
 
             scene_item_id = set_dice(
-                f'Dice_!{command["Name"]}', command["Dice"], results
+                f'Dice_!{command["Name"]}',
+                command["Dice"],
+                results,
             )
             scene = config["OBS"]["Scene"]
             cl.set_scene_item_enabled(scene, scene_item_id, True)
@@ -69,9 +74,7 @@ def set_dice(name, dice, values):
     itemId = ensure_dice_source(name)
     color = config["General"]["Color"]
     label = config["General"]["Label"]
-    background = config["General"]["Background"]
-    result = config["General"]["Result"]
-    resultBackground = config["General"]["ResultBackground"]
+    chromaKey = config["General"]["ChromaKey"]
     width, height = get_dimensions()
     cl.set_input_settings(
         name,
@@ -80,9 +83,7 @@ def set_dice(name, dice, values):
                 "https://dice.bee.ac/"
                 f"?dicehex={color}"
                 f"&labelhex={label}"
-                f"&chromahex={background}"
-                f"&resulthex={result}"
-                f"&resultbghex={resultBackground}"
+                f"&chromahex={chromaKey}"
                 f"&d=1d{dice}@{'%20'.join(values)}"
                 "&transparency=1"
                 "&noresult"
@@ -156,7 +157,7 @@ def ensure_dice_source(name):
         name,
         "Chroma Key",
         "chroma_key_filter_v2",
-        {"key_color_type": "custom", "color": config["General"]["Background"]},
+        {"key_color_type": "custom", "color": config["General"]["ChromaKey"]},
     )
     return itemId
 
@@ -182,13 +183,23 @@ async def run():
 
     try:
         input("press ENTER to stop\n")
+
     finally:
         chat.stop()
         await twitch.close()
 
 
-with open("config.toml", "rb") as f:
-    config = tomllib.load(f)
+yaml = YAML()
+if os.path.exists("config.toml"):
+    with open("config.toml", "rb") as f:
+        config = tomllib.load(f)
+
+    with open("config.yml", "w") as f:
+        yaml.dump(config, f)
+
+with open("config.yml", "r") as f:
+    config = yaml.load(f)
+
 
 cl = obs.ReqClient(
     host=config["OBS"]["Host"],
