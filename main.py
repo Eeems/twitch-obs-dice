@@ -31,12 +31,12 @@ def roll_command(command):
                         result += value
 
                     elif die[1] == "10":
-                        value = randint(0, 10)
+                        value = randint(0, 9)
                         results.append(str(value))
                         result += value
 
                     elif die[1] == "100":
-                        value = randint(0, 10)
+                        value = randint(0, 9)
                         results.append(str(value))
                         result += value * 10
 
