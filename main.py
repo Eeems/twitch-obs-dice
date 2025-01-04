@@ -11,8 +11,6 @@ from twitchAPI.type import AuthScope
 from twitchAPI.type import ChatEvent
 from twitchAPI.chat import Chat
 from twitchAPI.chat import EventData
-from twitchAPI.chat import ChatMessage
-from twitchAPI.chat import ChatSub
 from twitchAPI.chat import ChatCommand
 
 
