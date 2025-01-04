@@ -1,0 +1,202 @@
+import asyncio
+import tomllib
+
+import obsws_python as obs
+
+from random import randint
+
+from twitchAPI.twitch import Twitch
+from twitchAPI.oauth import UserAuthenticator
+from twitchAPI.type import AuthScope
+from twitchAPI.type import ChatEvent
+from twitchAPI.chat import Chat
+from twitchAPI.chat import EventData
+from twitchAPI.chat import ChatMessage
+from twitchAPI.chat import ChatSub
+from twitchAPI.chat import ChatCommand
+
+
+def roll_command(command):
+    condition = asyncio.Condition()
+
+    async def func(cmd: ChatCommand):
+        await condition.acquire()
+        try:
+            dice = [x.split("d") for x in command["Dice"].split("+")]
+            results = []
+            result = 0
+            for die in dice:
+                for i in range(0, int(die[0])):
+                    if die[1] in ("4", "6", "8", "12", "20"):
+                        value = randint(1, int(die[1]))
+                        results.append(str(value))
+                        result += value
+
+                    elif die[1] == "10":
+                        value = randint(0, 10)
+                        results.append(str(value))
+                        result += value
+
+                    elif die[1] == "100":
+                        value = randint(0, 10)
+                        results.append(str(value))
+                        result += value * 10
+
+            scene_item_id = set_dice(
+                f'Dice_!{command["Name"]}', command["Dice"], results
+            )
+            scene = config["OBS"]["Scene"]
+            cl.set_scene_item_enabled(scene, scene_item_id, True)
+            await asyncio.sleep(command["DisplayTime"])
+            cl.set_scene_item_enabled(scene, scene_item_id, False)
+            if "Message" in command and command["Message"]:
+                await cmd.reply(
+                    command["Message"]
+                    .replace("{user}", f"{cmd.user.name}")
+                    .replace("{result}", str(result))
+                )
+
+        finally:
+            condition.release()
+
+    return func
+
+
+def get_dimensions():
+    video_settings = cl.get_video_settings()
+    return video_settings.output_width, video_settings.output_height
+
+
+def set_dice(name, dice, values):
+    itemId = ensure_dice_source(name)
+    color = config["General"]["Color"]
+    label = config["General"]["Label"]
+    background = config["General"]["Background"]
+    result = config["General"]["Result"]
+    resultBackground = config["General"]["ResultBackground"]
+    width, height = get_dimensions()
+    cl.set_input_settings(
+        name,
+        {
+            "url": (
+                "https://dice.bee.ac/"
+                f"?dicehex={color}"
+                f"&labelhex={label}"
+                f"&chromahex={background}"
+                f"&resulthex={result}"
+                f"&resultbghex={resultBackground}"
+                f"&d=1d{dice}@{'%20'.join(values)}"
+                "&transparency=1"
+                "&noresult"
+                "&roll"
+            ),
+            "width": width,
+            "height": height,
+            "css": "",
+            "reroute_audio": False,
+            "shutdown": True,
+        },
+        True,
+    )
+    return itemId
+
+
+def ensure_dice_source(name):
+    scene = config["OBS"]["Scene"]
+    width, height = get_dimensions()
+    settings = {
+        "url": "",
+        "width": width,
+        "height": height,
+        "css": "",
+        "reroute_audio": False,
+        "shutdown": True,
+    }
+    if not [x for x in cl.get_input_list().inputs if x["inputName"] == name]:
+        cl.create_input(scene, name, "browser_source", settings, False)
+
+    cl.set_input_settings(name, settings, True)
+    itemIds = [
+        x["sceneItemId"]
+        for x in cl.get_scene_item_list(scene).scene_items
+        if x["sourceName"] == name
+    ]
+    if itemIds:
+        itemId = itemIds[0]
+
+    else:
+        itemId = cl.create_scene_item(scene, name, False).scene_item_id
+
+    cl.set_scene_item_transform(
+        scene,
+        itemId,
+        {
+            "boundsAlignment": 0,
+            "width": width,
+            "sourceWidth": width,
+            "boundsWidth": width,
+            "height": height,
+            "sourceHeight": height,
+            "boundsHeight": height,
+            "boundsType": "OBS_BOUNDS_SCALE_INNER",
+            "cropLeft": 0,
+            "cropRight": 0,
+            "cropTop": 0,
+            "cropBottom": 0,
+            "croptToBounds": False,
+            "positionX": 0,
+            "positionY": 0,
+            "scaleX": 1.0,
+            "scaleY": 1.0,
+        },
+    )
+    cl.set_scene_item_locked(scene, itemId, True)
+    for f in cl.get_source_filter_list(name).filters:
+        cl.remove_source_filter(name, f["filterName"])
+
+    cl.create_source_filter(
+        name,
+        "Chroma Key",
+        "chroma_key_filter_v2",
+        {"key_color_type": "custom", "color": config["General"]["Background"]},
+    )
+    return itemId
+
+
+async def on_ready(ready_event: EventData):
+    await ready_event.chat.join_room(config["Twitch"]["Channel"])
+
+
+async def run():
+    twitch = await Twitch(
+        config["Twitch"]["ClientId"], config["Twitch"]["ClientSecret"]
+    )
+    scope = [AuthScope.CHAT_READ, AuthScope.CHAT_EDIT]
+    auth = UserAuthenticator(twitch, scope)
+    token, refresh_token = await auth.authenticate()
+    await twitch.set_user_authentication(token, scope, refresh_token)
+    chat = await Chat(twitch)
+    chat.register_event(ChatEvent.READY, on_ready)
+    for command in config["General"]["Commands"]:
+        chat.register_command(command["Name"], roll_command(command))
+
+    chat.start()
+
+    try:
+        input("press ENTER to stop\n")
+    finally:
+        chat.stop()
+        await twitch.close()
+
+
+with open("config.toml", "rb") as f:
+    config = tomllib.load(f)
+
+cl = obs.ReqClient(
+    host=config["OBS"]["Host"],
+    port=config["OBS"]["Port"],
+    password=config["OBS"]["Password"],
+    timeout=3,
+)
+
+asyncio.run(run())

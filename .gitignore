@@ -1,0 +1,7 @@
+.venv/
+build/
+dist/
+config.toml
+nuitka-crash-report.xml
+compilation-report.xml
+*.spec
