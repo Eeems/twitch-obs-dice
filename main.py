@@ -230,7 +230,7 @@ async def run():
     chat = await Chat(twitch)
     chat.register_event(ChatEvent.READY, on_ready)
     for name, command in config["Commands"].items():
-        chat.register_command(name, roll_command(command))
+        chat.register_command(name, roll_command(name, command))
 
     chat.start()
 
