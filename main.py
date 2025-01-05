@@ -255,6 +255,8 @@ if os.path.exists("config.toml"):
     del config["General"]["Commands"]
     config["Display"] = config["General"]
     del config["General"]
+    config["Display"]["ChromaKey"] = config["Display"]["Background"]
+    del config["Display"]["Background"]
 
     with open("config.yml", "w") as f:
         yaml.dump(config, f)
