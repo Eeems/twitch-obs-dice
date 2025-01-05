@@ -43,7 +43,7 @@ async def roll_dice(
 
     scene_item_id = set_dice(
         f"Dice_!{name}",
-        command["Dice"],
+        spec,
         results,
     )
     cl.set_scene_item_enabled(scene, scene_item_id, True)
