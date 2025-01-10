@@ -67,7 +67,6 @@ class Bot:
             color=ft.Colors.RED,
             expand=True,
         )
-        await self.run()
         page.adaptive = True
         page.window.prevent_close = True
         page.window.on_event = self.on_event
@@ -170,6 +169,7 @@ class Bot:
         )
         page.on_route_change = self.route_change
         page.go("/")
+        await self.run()
 
     def route_change(self, e):
         self.page.controls.clear()
