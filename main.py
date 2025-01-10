@@ -7,6 +7,7 @@ import sqlite3
 import flet as ft
 import obsws_python as obs
 
+from datetime import datetime
 from random import randint
 
 from ruamel.yaml import YAML
@@ -91,6 +92,12 @@ class Bot:
             ),
             on_change=lambda e: page.go(["/", "/settings"][e.control.selected_index]),
         )
+        self.pending = ft.ListView(
+            spacing=10,
+            padding=20,
+            expand=True,
+            auto_scroll=True,
+        )
         self.main_view = ft.Row(
             [
                 self.rail,
@@ -103,6 +110,8 @@ class Bot:
                                 self.channel_text,
                             ]
                         ),
+                        ft.Text("Pending:"),
+                        self.pending,
                     ],
                     expand=True,
                 ),
@@ -171,11 +180,31 @@ class Bot:
         self.page.update()
 
     def on_event(self, e):
-        if e.data == "close":
-            self.page.window.prevent_close = False
-            self.page.window.on_event = None
-            self.page.update()
-            self.page.window.close()
+        if e.data != "close":
+            return
+
+        if not self.pending.controls:
+            self.close()
+            return
+
+        alert = ft.AlertDialog(
+            modal=True,
+            title=ft.Text("Are you sure?"),
+            content=ft.Text(
+                "There are pending items in the queue, are you sure you want to close?"
+            ),
+            actions=[
+                ft.TextButton("Yes", on_click=lambda e: self.close()),
+                ft.TextButton("No", on_click=lambda e: self.page.close(alert)),
+            ],
+        )
+        self.page.open(alert)
+
+    def close(self):
+        self.page.window.prevent_close = False
+        self.page.window.on_event = None
+        self.page.update()
+        self.page.window.close()
 
     def on_change(self, setting, type):
         async def on_change(e):
@@ -183,10 +212,14 @@ class Bot:
             if type == "twitch":
                 self.channel_text.value = "(unknown)"
                 self.cursor.execute("delete from authentication")
-                await self.connect_twitch()
+                e = await self.connect_twitch()
+                if e:
+                    print(f"Failed to connect to twitch: {e}")
 
             elif type == "obs":
-                await self.connect_obs()
+                e = await self.connect_obs()
+                if e:
+                    print(f"Failed to connect to OBS: {e}")
 
         return on_change
 
@@ -353,7 +386,7 @@ class Bot:
             self.chat = await Chat(self.twitch)
             self.chat.register_event(ChatEvent.READY, self.on_ready)
             for name, command in self.commands.items():
-                self.chat.register_command(name, self.roll_command(name, command))
+                self.chat.register_command(name, self.roll_command(command))
 
             self.chat.start()
             return None
@@ -422,7 +455,7 @@ class Bot:
         )
         self.connection.commit()
 
-    def roll_command(self, name, command):
+    def roll_command(self, command):
         if "Script" in command and command["Script"]:
             code = compile(
                 command["Script"],
@@ -434,11 +467,19 @@ class Bot:
         condition = asyncio.Condition()
 
         async def func(cmd: ChatCommand):
+            timestamp = datetime.fromtimestamp(cmd.sent_timestamp / 1e3)
+            text = ft.Text(
+                f"[{timestamp.strftime('%Y-%m-%d %I:%M:%S %p')}] {cmd.user.name} !{cmd.name}"
+            )
+            self.pending.controls.append(text)
+            self.page.update()
             await condition.acquire()
+            text.weight = ft.FontWeight.BOLD
+            self.page.update()
             try:
                 if "Dice" in command and command["Dice"]:
                     dice, result, results = await self.roll_dice(
-                        name,
+                        cmd.name,
                         command["Dice"],
                         self.get_setting("obs_scene"),
                         command.get("DisplayTime", 5),
@@ -484,6 +525,8 @@ class Bot:
 
             finally:
                 condition.release()
+                self.pending.controls.remove(text)
+                self.page.update()
 
         return func
 
