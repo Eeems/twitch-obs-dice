@@ -2,3 +2,4 @@ twitchAPI
 obsws_python
 ruamel.yaml
 flet
+certifi

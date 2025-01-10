@@ -54,64 +54,121 @@ class Bot:
             value=self.get_setting("obs_scene") or "",
             on_change=self.on_change("obs_scene", "obs"),
         )
-        self.twitch_connected = ft.Icon(name=ft.Icons.CLOSE, color=ft.Colors.RED)
-        self.obs_connected = ft.Icon(name=ft.Icons.CLOSE, color=ft.Colors.RED)
+        self.twitch_connected = ft.Icon(
+            name=ft.Icons.CLOSE,
+            color=ft.Colors.RED,
+            expand=True,
+        )
+        self.obs_connected = ft.Icon(
+            name=ft.Icons.CLOSE,
+            color=ft.Colors.RED,
+            expand=True,
+        )
         await self.run()
         page.adaptive = True
         page.window.prevent_close = True
         page.window.on_event = self.on_event
-        page.add(
-            ft.Row(
-                controls=(
-                    ft.Text("Twitch:"),
-                    self.twitch_connected,
-                )
+        self.rail = ft.NavigationRail(
+            selected_index=0,
+            group_alignment=1,
+            destinations=[
+                ft.NavigationRailDestination(
+                    icon=ft.Icons.HOME,
+                    selected_icon=ft.Icons.HOME_FILLED,
+                    label_content=ft.Text("Home"),
+                ),
+                ft.NavigationRailDestination(
+                    icon=ft.Icons.SETTINGS_OUTLINED,
+                    selected_icon=ft.Icons.SETTINGS,
+                    label_content=ft.Text("Settings"),
+                ),
+            ],
+            leading=ft.Row(
+                [
+                    ft.Column([ft.Text("Twitch:"), ft.Text("OBS:")]),
+                    ft.Column([self.twitch_connected, self.obs_connected]),
+                ]
             ),
-            ft.Row(
-                controls=(
-                    ft.Text("Channel:"),
-                    self.channel_text,
-                )
-            ),
-            ft.TextField(
-                label="Client Id",
-                value=self.get_setting("client_id") or "",
-                on_change=self.on_change("client_id", "twitch"),
-                password=True,
-                can_reveal_password=True,
-            ),
-            ft.TextField(
-                label="Client Secret",
-                value=self.get_setting("client_secret") or "",
-                on_change=self.on_change("client_secret", "twitch"),
-                password=True,
-                can_reveal_password=True,
-            ),
-            ft.Row(
-                controls=(
-                    ft.Text("OBS:"),
-                    self.obs_connected,
-                )
-            ),
-            ft.TextField(
-                label="OBS Host",
-                value=self.get_setting("obs_host") or "",
-                on_change=self.on_change("obs_host", "obs"),
-            ),
-            ft.TextField(
-                label="OBS Port",
-                value=self.get_setting("obs_port") or "",
-                on_change=self.on_change("obs_port", "obs"),
-            ),
-            ft.TextField(
-                label="OBS Password",
-                value=self.get_setting("obs_password") or "",
-                on_change=self.on_change("obs_password", "obs"),
-                password=True,
-                can_reveal_password=True,
-            ),
-            self.obs_scene_input,
+            on_change=lambda e: page.go(["/", "/settings"][e.control.selected_index]),
         )
+        self.main_view = ft.Row(
+            [
+                self.rail,
+                ft.VerticalDivider(width=1),
+                ft.Column(
+                    [
+                        ft.Row(
+                            [
+                                ft.Text("Channel:"),
+                                self.channel_text,
+                            ]
+                        ),
+                    ],
+                    expand=True,
+                ),
+            ],
+            expand=True,
+        )
+        self.settings_view = ft.Row(
+            [
+                self.rail,
+                ft.VerticalDivider(width=1),
+                ft.Column(
+                    [
+                        ft.TextField(
+                            label="Client Id",
+                            value=self.get_setting("client_id") or "",
+                            on_change=self.on_change("client_id", "twitch"),
+                        ),
+                        ft.TextField(
+                            label="Client Secret",
+                            value=self.get_setting("client_secret") or "",
+                            on_change=self.on_change("client_secret", "twitch"),
+                            password=True,
+                            can_reveal_password=True,
+                        ),
+                        ft.Row(
+                            [
+                                ft.Text("Channel:"),
+                                self.channel_text,
+                            ]
+                        ),
+                        ft.TextField(
+                            label="OBS Host",
+                            value=self.get_setting("obs_host") or "",
+                            on_change=self.on_change("obs_host", "obs"),
+                        ),
+                        ft.TextField(
+                            label="OBS Port",
+                            value=self.get_setting("obs_port") or "",
+                            on_change=self.on_change("obs_port", "obs"),
+                        ),
+                        ft.TextField(
+                            label="OBS Password",
+                            value=self.get_setting("obs_password") or "",
+                            on_change=self.on_change("obs_password", "obs"),
+                            password=True,
+                            can_reveal_password=True,
+                        ),
+                        self.obs_scene_input,
+                    ],
+                    expand=True,
+                ),
+            ],
+            expand=True,
+        )
+        page.on_route_change = self.route_change
+        page.go("/")
+
+    def route_change(self, e):
+        self.page.controls.clear()
+        if e.route == "/":
+            self.page.controls.append(self.main_view)
+
+        if e.route == "/settings":
+            self.page.controls.append(self.settings_view)
+
+        self.page.update()
 
     def on_event(self, e):
         if e.data == "close":
@@ -123,8 +180,8 @@ class Bot:
     def on_change(self, setting, type):
         async def on_change(e):
             self.set_setting(setting, e.control.value)
-            self.channel_text.value = "(unknown)"
             if type == "twitch":
+                self.channel_text.value = "(unknown)"
                 self.cursor.execute("delete from authentication")
                 await self.connect_twitch()
 
@@ -219,6 +276,8 @@ class Bot:
             except:
                 pass
 
+            delattr(self, "cl")
+
         try:
             self.cl = obs.ReqClient(
                 host=self.get_setting("obs_host"),
@@ -255,11 +314,15 @@ class Bot:
             except:
                 pass
 
+            delattr(self, "chat")
+
         if hasattr(self, "twitch"):
             try:
                 await self.twitch.close()
             except:
                 pass
+
+            delattr(self, "connect")
 
         try:
             self.twitch = await Twitch(
@@ -451,14 +514,15 @@ class Bot:
                     results.append(str(value))
                     result += value * 10
 
-        scene_item_id = self.set_dice(
-            f"Dice_!{name}",
-            spec,
-            results,
-        )
-        self.cl.set_scene_item_enabled(scene, scene_item_id, True)
-        await asyncio.sleep(displayTime)
-        self.cl.set_scene_item_enabled(scene, scene_item_id, False)
+        if hasattr(self, "cl"):
+            scene_item_id = self.set_dice(
+                f"Dice_!{name}",
+                spec,
+                results,
+            )
+            self.cl.set_scene_item_enabled(scene, scene_item_id, True)
+            await asyncio.sleep(displayTime)
+            self.cl.set_scene_item_enabled(scene, scene_item_id, False)
 
         return dice, result, results
 
