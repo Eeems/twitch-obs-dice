@@ -56,6 +56,7 @@ class Bot:
             label="OBS Scene",
             value=self.get_setting("obs_scene") or "",
             on_change=self.on_change("obs_scene", "obs"),
+            options=[ft.dropdown.Option(self.get_setting("obs_scene") or "(none)")],
         )
         self.twitch_connected = ft.Icon(
             name=ft.Icons.CLOSE,
@@ -145,12 +146,12 @@ class Bot:
                         ),
                         ft.TextField(
                             label="OBS Host",
-                            value=self.get_setting("obs_host") or "",
+                            value=self.get_setting("obs_host") or "localhost",
                             on_change=self.on_change("obs_host", "obs"),
                         ),
                         ft.TextField(
                             label="OBS Port",
-                            value=self.get_setting("obs_port") or "",
+                            value=self.get_setting("obs_port") or 4455,
                             on_change=self.on_change("obs_port", "obs"),
                         ),
                         ft.TextField(
@@ -307,7 +308,7 @@ class Bot:
         self.obs_connected.color = ft.Colors.YELLOW
         self.obs_scene_input.error_text = None
         self.obs_scene_input.options = [
-            ft.dropdown.Option(self.get_setting("obs_scene"))
+            ft.dropdown.Option(self.get_setting("obs_scene") or "(none)")
         ]
         self.page.update()
         if hasattr(self, "cl"):
@@ -320,14 +321,15 @@ class Bot:
 
         try:
             self.cl = obs.ReqClient(
-                host=self.get_setting("obs_host"),
-                port=self.get_setting("obs_port"),
+                host=self.get_setting("obs_host") or "localhost",
+                port=self.get_setting("obs_port") or 4450,
                 password=self.get_setting("obs_password"),
                 timeout=3,
             )
-            scene = self.get_setting("obs_scene")
+            scene = self.get_setting("obs_scene") or ""
             scenes = [x["sceneName"] for x in self.cl.get_scene_list().scenes]
             self.obs_scene_input.options = [ft.dropdown.Option(x) for x in scenes]
+
             if scene not in scenes:
                 self.obs_scene_input.error_text = "Scene not found"
                 raise Exception("Scene not found")
