@@ -4,7 +4,7 @@ import os
 import tomllib
 import sqlite3
 
-import tkinter as tk
+import flet as ft
 import obsws_python as obs
 
 from random import randint
@@ -19,13 +19,11 @@ from twitchAPI.twitch import Twitch
 from twitchAPI.type import AuthScope
 from twitchAPI.type import ChatEvent
 
-from async_tkinter_loop import async_handler, async_mainloop
-
 assert sqlite3.threadsafety == 3
 
 
-class Bot(tk.Frame):
-    def __init__(self, root):
+class Bot:
+    def __init__(self):
         self.connection = sqlite3.connect("bot.sqlite", check_same_thread=False)
         self.cursor = self.connection.cursor()
         self.cursor.execute(
@@ -46,6 +44,96 @@ class Bot(tk.Frame):
         """
         )
 
+        self.migrate_config()
+
+    async def main(self, page):
+        self.page = page
+        self.channel_text = ft.Text()
+        self.obs_scene_input = ft.Dropdown(
+            label="OBS Scene",
+            value=self.get_setting("obs_scene") or "",
+            on_change=self.on_change("obs_scene", "obs"),
+        )
+        self.twitch_connected = ft.Icon(name=ft.Icons.CLOSE, color=ft.Colors.RED)
+        self.obs_connected = ft.Icon(name=ft.Icons.CLOSE, color=ft.Colors.RED)
+        await self.run()
+        page.adaptive = True
+        page.window.prevent_close = True
+        page.window.on_event = self.on_event
+        page.add(
+            ft.Row(
+                controls=(
+                    ft.Text("Twitch:"),
+                    self.twitch_connected,
+                )
+            ),
+            ft.Row(
+                controls=(
+                    ft.Text("Channel:"),
+                    self.channel_text,
+                )
+            ),
+            ft.TextField(
+                label="Client Id",
+                value=self.get_setting("client_id") or "",
+                on_change=self.on_change("client_id", "twitch"),
+                password=True,
+                can_reveal_password=True,
+            ),
+            ft.TextField(
+                label="Client Secret",
+                value=self.get_setting("client_secret") or "",
+                on_change=self.on_change("client_secret", "twitch"),
+                password=True,
+                can_reveal_password=True,
+            ),
+            ft.Row(
+                controls=(
+                    ft.Text("OBS:"),
+                    self.obs_connected,
+                )
+            ),
+            ft.TextField(
+                label="OBS Host",
+                value=self.get_setting("obs_host") or "",
+                on_change=self.on_change("obs_host", "obs"),
+            ),
+            ft.TextField(
+                label="OBS Port",
+                value=self.get_setting("obs_port") or "",
+                on_change=self.on_change("obs_port", "obs"),
+            ),
+            ft.TextField(
+                label="OBS Password",
+                value=self.get_setting("obs_password") or "",
+                on_change=self.on_change("obs_password", "obs"),
+                password=True,
+                can_reveal_password=True,
+            ),
+            self.obs_scene_input,
+        )
+
+    def on_event(self, e):
+        if e.data == "close":
+            self.page.window.prevent_close = False
+            self.page.window.on_event = None
+            self.page.update()
+            self.page.window.close()
+
+    def on_change(self, setting, type):
+        async def on_change(e):
+            self.set_setting(setting, e.control.value)
+            self.channel_text.value = "(unknown)"
+            if type == "twitch":
+                self.cursor.execute("delete from authentication")
+                await self.connect_twitch()
+
+            elif type == "obs":
+                await self.connect_obs()
+
+        return on_change
+
+    def migrate_config(self):
         if os.path.exists("config.toml"):
             with open("config.toml", "rb") as f:
                 config = tomllib.load(f)
@@ -70,69 +158,17 @@ class Bot(tk.Frame):
             # os.unlink("config.yml")
             self.import_config(config)
 
-        self.root = root
-        super().__init__(root)
-        root.grid_rowconfigure(0, weight=1)
-        root.grid_columnconfigure(0, weight=1)
-        self.grid(column=0, row=0, sticky="news")
-
-        clientIdLabel = tk.Label(self, text="Client Id", anchor="w")
-        self.clientId = tk.StringVar()
-        self.clientId.set(self.get_setting("client_id") or "")
-        clientIdEntry = tk.Entry(self, textvariable=self.clientId)
-
-        clientSecretLabel = tk.Label(self, text="Client Secret", anchor="w")
-        self.clientSecret = tk.StringVar()
-        self.clientSecret.set(self.get_setting("client_secret") or "")
-        clientSecretEntry = tk.Entry(self, textvariable=self.clientSecret, show="*")
-
-        channelLabel = tk.Label(self, text="Channel", anchor="w")
-        self.channel = tk.StringVar()
-        self.channel.set(self.get_setting("channel") or "")
-        channelEntry = tk.Entry(self, textvariable=self.channel)
-
-        updateButton = tk.Button(
-            self,
-            text="Update",
-            command=async_handler(self.update_settings),
-        )
-
-        clientIdLabel.grid(row=0, column=0, sticky="new")
-        clientIdEntry.grid(row=0, column=1, sticky="new")
-        clientSecretLabel.grid(row=1, column=0, sticky="new")
-        clientSecretEntry.grid(row=1, column=1, sticky="new")
-        channelLabel.grid(row=2, column=0, sticky="new")
-        channelEntry.grid(row=2, column=1, sticky="new")
-        updateButton.grid(row=3, column=1, sticky="new")
-        self.grid_rowconfigure(0, weight=0)
-        self.grid_rowconfigure(1, weight=0)
-        self.grid_rowconfigure(2, weight=0)
-        self.grid_rowconfigure(3, weight=1)
-        self.grid_columnconfigure(0, weight=0)
-        self.grid_columnconfigure(1, weight=2)
-
-        self.root.after_idle(async_handler(self.run))
-        self.root.wm_protocol("WM_DELETE_WINDOW", async_handler(self.stop))
-
-        global cl
-        cl = obs.ReqClient(
-            host=self.get_setting("obs_host"),
-            port=self.get_setting("obs_port"),
-            password=self.get_setting("obs_password"),
-            timeout=3,
-        )
-
     def import_config(self, config):
-        self.set_setting("client_id", config["Twitch"]["ClientId"])
-        self.set_setting("client_secret", config["Twitch"]["ClientSecret"])
-        self.set_setting("channel", config["Twitch"]["Channel"])
-        self.set_setting("obs_scene", config["OBS"]["Scene"])
-        self.set_setting("obs_host", config["OBS"]["Host"])
-        self.set_setting("obs_port", config["OBS"]["Port"])
-        self.set_setting("obs_password", config["OBS"]["Password"])
-        self.set_setting("default_dice_colour", config["Display"]["Color"])
-        self.set_setting("default_label_colour", config["Display"]["Label"])
-        self.set_setting("default_chroma_key", config["Display"]["ChromaKey"])
+        # self.set_setting("client_id", config["Twitch"]["ClientId"])
+        # self.set_setting("client_secret", config["Twitch"]["ClientSecret"])
+        # self.set_setting("channel", config["Twitch"]["Channel"])
+        # self.set_setting("obs_scene", config["OBS"]["Scene"])
+        # self.set_setting("obs_host", config["OBS"]["Host"])
+        # self.set_setting("obs_port", config["OBS"]["Port"])
+        # self.set_setting("obs_password", config["OBS"]["Password"])
+        # self.set_setting("default_dice_colour", config["Display"]["Color"])
+        # self.set_setting("default_label_colour", config["Display"]["Label"])
+        # self.set_setting("default_chroma_key", config["Display"]["ChromaKey"])
         self.commands = config["Commands"]
         # Todo - import commands
 
@@ -160,44 +196,115 @@ class Bot(tk.Frame):
         )
         self.connection.commit()
 
-    def mainloop(self):
-        async_mainloop(self.root)
-
     async def run(self):
-        self.twitch = await Twitch(
-            self.get_setting("client_id"),
-            self.get_setting("client_secret"),
-        )
-        scope = [AuthScope.CHAT_READ, AuthScope.CHAT_EDIT]
+        e = await self.connect_twitch()
+        if e:
+            print(f"Failed to connect to twitch: {e}")
 
-        row = self.cursor.execute(
+        e = await self.connect_obs()
+        if e:
+            print(f"Failed to connect to OBS: {e}")
+
+    async def connect_obs(self):
+        self.obs_connected.name = ft.Icons.CHANGE_CIRCLE
+        self.obs_connected.color = ft.Colors.YELLOW
+        self.obs_scene_input.error_text = None
+        self.obs_scene_input.options = [
+            ft.dropdown.Option(self.get_setting("obs_scene"))
+        ]
+        self.page.update()
+        if hasattr(self, "cl"):
+            try:
+                self.cl.disconnect()
+            except:
+                pass
+
+        try:
+            self.cl = obs.ReqClient(
+                host=self.get_setting("obs_host"),
+                port=self.get_setting("obs_port"),
+                password=self.get_setting("obs_password"),
+                timeout=3,
+            )
+            scene = self.get_setting("obs_scene")
+            scenes = [x["sceneName"] for x in self.cl.get_scene_list().scenes]
+            self.obs_scene_input.options = [ft.dropdown.Option(x) for x in scenes]
+            if scene not in scenes:
+                self.obs_scene_input.error_text = "Scene not found"
+                raise Exception("Scene not found")
+
+            self.obs_connected.name = ft.Icons.CHECK_CIRCLE
+            self.obs_connected.color = ft.Colors.GREEN
+            return None
+
+        except Exception as e:
+            self.obs_connected.name = ft.Icons.CLOSE
+            self.obs_connected.color = ft.Colors.RED
+            return e
+
+        finally:
+            self.page.update()
+
+    async def connect_twitch(self):
+        self.twitch_connected.name = ft.Icons.CHANGE_CIRCLE
+        self.twitch_connected.color = ft.Colors.YELLOW
+        self.page.update()
+        if hasattr(self, "chat"):
+            try:
+                await self.chat.stop()
+            except:
+                pass
+
+        if hasattr(self, "twitch"):
+            try:
+                await self.twitch.close()
+            except:
+                pass
+
+        try:
+            self.twitch = await Twitch(
+                self.get_setting("client_id"),
+                self.get_setting("client_secret"),
+            )
+            scope = [AuthScope.CHAT_READ, AuthScope.CHAT_EDIT]
+            row = self.cursor.execute(
+                """
+                select
+                    auth_token,
+                    refresh_token
+                from authentication
+                where id = 1;
             """
-            select
-                auth_token,
-                refresh_token
-            from authentication
-            where id = 1;
-        """
-        ).fetchone()
-        if row:
-            token, refresh_token = row
+            ).fetchone()
+            if row:
+                token, refresh_token = row
 
-        else:
-            auth = UserAuthenticator(self.twitch, scope)
-            token, refresh_token = await auth.authenticate()
-            await self.on_user_auth_refresh(token, refresh_token)
+            else:
+                auth = UserAuthenticator(self.twitch, scope)
+                token, refresh_token = await auth.authenticate()
+                await self.on_user_auth_refresh(token, refresh_token)
 
-        self.twitch.user_auth_refresh_callback = self.on_user_auth_refresh
-        await self.twitch.set_user_authentication(token, scope, refresh_token)
-        self.chat = await Chat(self.twitch)
-        self.chat.register_event(ChatEvent.READY, self.on_ready)
-        for name, command in self.commands.items():
-            self.chat.register_command(name, self.roll_command(name, command))
+            self.twitch.user_auth_refresh_callback = self.on_user_auth_refresh
+            await self.twitch.set_user_authentication(token, scope, refresh_token)
+            self.channel_text.value = await self.get_channel()
+            self.chat = await Chat(self.twitch)
+            self.chat.register_event(ChatEvent.READY, self.on_ready)
+            for name, command in self.commands.items():
+                self.chat.register_command(name, self.roll_command(name, command))
 
-        self.chat.start()
+            self.chat.start()
+            return None
+
+        except Exception as e:
+            self.twitch_connected.name = ft.Icons.CLOSE
+            self.twitch_connected.color = ft.Colors.RED
+            return e
+
+        finally:
+            self.page.update()
 
     async def stop(self):
-        if self.chat:
+        if hasattr(self, "chat") and self.chat:
             try:
                 self.chat.stop()
 
@@ -205,19 +312,32 @@ class Bot(tk.Frame):
                 if str(e) != "not running":
                     raise
 
-            self.chat = None
+            delattr(self, "chat")
 
-        await self.twitch.close()
-        if self.root:
-            self.root.destroy()
-            self.root = None
+        if hasattr(self, "twitch") and self.twitch:
+            await self.twitch.close()
+            delattr(self, "twitch")
 
-        if self.connection:
+        if hasattr(self, "connection") and self.connection:
             self.connection.close()
-            self.connection = None
+            delattr(self, "connection")
+            delattr(self, "cursor")
+
+        if hasattr(self, "cl") and self.cl:
+            self.cl.disconnect()
+            delattr(self, "cl")
+
+    async def get_channel(self):
+        async for user in self.twitch.get_users():
+            return user.login
+
+        return ""
 
     async def on_ready(self, ready_event: EventData):
-        await ready_event.chat.join_room(self.get_setting("channel"))
+        await ready_event.chat.join_room(await self.get_channel())
+        self.twitch_connected.name = ft.Icons.CHECK_CIRCLE
+        self.twitch_connected.color = ft.Colors.GREEN
+        self.page.update()
 
     async def on_user_auth_refresh(self, auth_token, refresh_token):
         self.cursor.execute(
@@ -238,28 +358,6 @@ class Bot(tk.Frame):
             ),
         )
         self.connection.commit()
-
-    async def update_settings(self):
-        self.cursor.execute(
-            """
-            insert or replace into twitch (
-                id,
-                client_id,
-                client_secret,
-                channel
-            ) values (
-                1,
-                ?,
-                ?,
-                ?
-            )
-        """,
-            (
-                self.clientId.get(),
-                self.clientSecret.get(),
-                self.channel.get(),
-            ),
-        )
 
     def roll_command(self, name, command):
         if "Script" in command and command["Script"]:
@@ -358,14 +456,14 @@ class Bot(tk.Frame):
             spec,
             results,
         )
-        cl.set_scene_item_enabled(scene, scene_item_id, True)
+        self.cl.set_scene_item_enabled(scene, scene_item_id, True)
         await asyncio.sleep(displayTime)
-        cl.set_scene_item_enabled(scene, scene_item_id, False)
+        self.cl.set_scene_item_enabled(scene, scene_item_id, False)
 
         return dice, result, results
 
     def get_dimensions(self):
-        video_settings = cl.get_video_settings()
+        video_settings = self.cl.get_video_settings()
         return video_settings.output_width, video_settings.output_height
 
     def set_dice(self, name, dice, values):
@@ -374,7 +472,7 @@ class Bot(tk.Frame):
         label = self.get_setting("default_label_colour")
         chromaKey = self.get_setting("default_chroma_key")
         width, height = self.get_dimensions()
-        cl.set_input_settings(
+        self.cl.set_input_settings(
             name,
             {
                 "url": (
@@ -408,22 +506,22 @@ class Bot(tk.Frame):
             "reroute_audio": False,
             "shutdown": True,
         }
-        if not [x for x in cl.get_input_list().inputs if x["inputName"] == name]:
-            cl.create_input(scene, name, "browser_source", settings, False)
+        if not [x for x in self.cl.get_input_list().inputs if x["inputName"] == name]:
+            self.cl.create_input(scene, name, "browser_source", settings, False)
 
-        cl.set_input_settings(name, settings, True)
+        self.cl.set_input_settings(name, settings, True)
         itemIds = [
             x["sceneItemId"]
-            for x in cl.get_scene_item_list(scene).scene_items
+            for x in self.cl.get_scene_item_list(scene).scene_items
             if x["sourceName"] == name
         ]
         if itemIds:
             itemId = itemIds[0]
 
         else:
-            itemId = cl.create_scene_item(scene, name, False).scene_item_id
+            itemId = self.cl.create_scene_item(scene, name, False).scene_item_id
 
-        cl.set_scene_item_transform(
+        self.cl.set_scene_item_transform(
             scene,
             itemId,
             {
@@ -446,11 +544,11 @@ class Bot(tk.Frame):
                 "scaleY": 1.0,
             },
         )
-        cl.set_scene_item_locked(scene, itemId, True)
-        for f in cl.get_source_filter_list(name).filters:
-            cl.remove_source_filter(name, f["filterName"])
+        self.cl.set_scene_item_locked(scene, itemId, True)
+        for f in self.cl.get_source_filter_list(name).filters:
+            self.cl.remove_source_filter(name, f["filterName"])
 
-        cl.create_source_filter(
+        self.cl.create_source_filter(
             name,
             "Chroma Key",
             "chroma_key_filter_v2",
@@ -462,11 +560,10 @@ class Bot(tk.Frame):
         return itemId
 
 
-root = tk.Tk()
-bot = Bot(root)
+bot = Bot()
 try:
-    bot.mainloop()
+    ft.app(bot.main)
 
 finally:
-    loop = asyncio.get_event_loop()
+    loop = asyncio.new_event_loop()
     loop.run_until_complete(bot.stop())
