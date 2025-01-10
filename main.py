@@ -25,6 +25,7 @@ assert sqlite3.threadsafety == 3
 
 class Bot:
     def __init__(self):
+        self.condition = asyncio.Condition()
         self.connection = sqlite3.connect("bot.sqlite", check_same_thread=False)
         self.cursor = self.connection.cursor()
         self.cursor.execute(
@@ -48,6 +49,7 @@ class Bot:
         self.migrate_config()
 
     async def main(self, page):
+        self.loop = asyncio.get_event_loop()
         self.page = page
         self.channel_text = ft.Text()
         self.obs_scene_input = ft.Dropdown(
@@ -201,10 +203,15 @@ class Bot:
         self.page.open(alert)
 
     def close(self):
+        asyncio.run_coroutine_threadsafe(self.condition.acquire(), self.loop)
         self.page.window.prevent_close = False
         self.page.window.on_event = None
         self.page.update()
         self.page.window.close()
+        scene = self.get_setting("obs_scene")
+        for name, command in self.commands.items():
+            itemId = self.ensure_dice_source(f"Dice_!{name}")
+            self.cl.set_scene_item_enabled(scene, itemId, False)
 
     def on_change(self, setting, type):
         async def on_change(e):
@@ -464,8 +471,6 @@ class Bot:
                 flags=ast.PyCF_ALLOW_TOP_LEVEL_AWAIT,
             )
 
-        condition = asyncio.Condition()
-
         async def func(cmd: ChatCommand):
             timestamp = datetime.fromtimestamp(cmd.sent_timestamp / 1e3)
             text = ft.Text(
@@ -473,60 +478,62 @@ class Bot:
             )
             self.pending.controls.append(text)
             self.page.update()
-            await condition.acquire()
-            text.weight = ft.FontWeight.BOLD
-            self.page.update()
-            try:
-                if "Dice" in command and command["Dice"]:
-                    dice, result, results = await self.roll_dice(
-                        cmd.name,
-                        command["Dice"],
-                        self.get_setting("obs_scene"),
-                        command.get("DisplayTime", 5),
-                    )
-
-                else:
-                    results = []
-                    result = 0
-                    dice = []
-
-                if "Message" in command and command["Message"]:
-                    await cmd.reply(
-                        command["Message"]
-                        .replace("{user}", f"{cmd.user.name}")
-                        .replace("{result}", str(result))
-                    )
-
-                if "Script" in command and command["Script"]:
-                    try:
-                        coroutine: Awaitable | None = eval(
-                            code,
-                            {
-                                "chat": cmd.chat,
-                                "config": config,
-                                "obs": cl,
-                                "bot": bot,
-                                "roll_dice": bot.roll_dice,
-                                "twitch": cmd.chat.twitch,
-                            },
-                            {
-                                "message": cmd,
-                                "command": command,
-                                "dice": dice,
-                                "result": result,
-                                "results": results,
-                            },
-                        )
-                        if coroutine is not None:
-                            await coroutine
-
-                    except Exception as e:
-                        print(e)
-
-            finally:
-                condition.release()
-                self.pending.controls.remove(text)
+            async with self.condition:
+                text.weight = ft.FontWeight.BOLD
                 self.page.update()
+                try:
+                    if "Dice" in command and command["Dice"]:
+                        dice, result, results = await self.roll_dice(
+                            cmd.name,
+                            command["Dice"],
+                            command.get("DisplayTime", 5),
+                        )
+
+                    else:
+                        results = []
+                        result = 0
+                        dice = []
+
+                    if "Message" in command and command["Message"]:
+                        await cmd.reply(
+                            command["Message"]
+                            .replace("{user}", f"{cmd.user.name}")
+                            .replace("{result}", str(result))
+                        )
+
+                    if "Script" in command and command["Script"]:
+                        try:
+                            coroutine: Awaitable | None = eval(
+                                code,
+                                {
+                                    "chat": cmd.chat,
+                                    "config": config,
+                                    "obs": cl,
+                                    "bot": bot,
+                                    "roll_dice": bot.roll_dice,
+                                    "twitch": cmd.chat.twitch,
+                                },
+                                {
+                                    "message": cmd,
+                                    "command": command,
+                                    "dice": dice,
+                                    "result": result,
+                                    "results": results,
+                                },
+                            )
+                            if coroutine is not None:
+                                await coroutine
+
+                        except Exception as e:
+                            print(e)
+
+                finally:
+                    try:
+                        self.pending.controls.remove(text)
+                        self.page.update()
+
+                    except:
+                        pass
 
         return func
 
@@ -534,9 +541,9 @@ class Bot:
         self,
         name,
         spec: str,
-        scene: str,
         displayTime: int,
     ) -> tuple[list[str], int, list[list[int]]]:
+        scene = self.get_setting("obs_scene")
         results = []
         result = 0
         dice = [x.split("d") for x in spec.split("+")]
