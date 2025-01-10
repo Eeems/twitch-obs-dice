@@ -7,3 +7,4 @@ nuitka-crash-report.xml
 compilation-report.xml
 *.spec
 *.exe
+*.sqlite
